@@ -12,7 +12,9 @@ import sqlite3
 app = FastAPI(title="Donate Shop All-in-One")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "123456789").split(",")]
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "8800181441").split(",")
+                                      
+                                
 DB_PATH = "shop.db"
 
 # --- БАЗА ДАННЫХ ---
