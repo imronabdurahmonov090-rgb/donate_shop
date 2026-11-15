@@ -321,84 +321,65 @@ def serve_index():
     </script>
 </body>
 </html>"""
+import os
+import sqlite3
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
-# --- АДМИН-ПАНЕЛЬ (/admin) ---
-@app.get("/admin", response_class=HTMLResponse)
-def serve_admin():
-    return """<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Админ-панель</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        body { background: #0b0b0f; color: #fff; font-family: sans-serif; padding: 16px; }
-        .card { background: #161622; padding: 12px; margin-bottom: 10px; border-radius: 8px; }
-        input, select { width: 100%; padding: 8px; margin: 6px 0; background: #222; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; }
-        button { background: #8700ff; color: #fff; border: none; padding: 10px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <h1>Админ-панель</h1>
-    <div class="card">
-        <h3>Добавить товар</h3>
-        <input type="text" id="title" placeholder="Название">
-        <select id="cat">
-            <option value="stars">Telegram Stars</option>
-            <option value="premium">Telegram Premium</option>
-            <option value="robux">Robux</option>
-            <option value="standoff">Standoff 2 Gold</option>
-            <option value="gifts">Подарки Telegram</option>
-            <option value="subscriptions">Подписки</option>
-        </select>
-        <input type="number" id="price" placeholder="Цена в сумах">
-        <input type="text" id="img" placeholder="Ссылка на картинку">
-        <button onclick="add()">Добавить</button>
-    </div>
-    <h2>Заказы</h2>
-    <div id="orders">Загрузка...</div>
-    <script>
-        const tg = window.Telegram.WebApp;
-        async function loadOrders() {
-            const res = await fetch(`/api/admin/orders?init_data=${encodeURIComponent(tg.initData)}`);
-            const orders = await res.json();
-            document.getElementById('orders').innerHTML = orders.map(o => `
-                <div class="card">
-                    <b>Заказ #${o.id}</b> | ${o.full_name} (@${o.username})<br>
-                    Сумма: <b>${o.total_price} сум</b> | Оплата: ${o.payment_method}<br>
-                    Статус: <b>${o.status}</b>
-                    <select onchange="up(${o.id}, this.value)">
-                        <option value="pending_payment" ${o.status==='pending_payment'?'selected':''}>Ожидает оплаты</option>
-                        <option value="paid" ${o.status==='paid'?'selected':''}>Оплачен</option>
-                        <option value="completed" ${o.status==='completed'?'selected':''}>Выполнен</option>
-                        <option value="cancelled" ${o.status==='cancelled'?'selected':''}>Отменён</option>
-                    </select>
-                </div>
-            `).join('');
-        }
-        async function add() {
-            const res = await fetch(`/api/admin/products?init_data=${encodeURIComponent(tg.initData)}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: document.getElementById('title').value,
-                    category_slug: document.getElementById('cat').value,
-                    price: parseInt(document.getElementById('price').value),
-                    image_url: document.getElementById('img').value
-                })
-            });
-            if((await res.json()).success) { alert('Успешно!'); location.reload(); }
-        }
-        async function up(id, status) {
-            await fetch(`/api/admin/order/${id}/status?init_data=${encodeURIComponent(tg.initData)}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ status })
-            });
-            loadOrders();
-        }
-        loadOrders();
-    </script>
-</body>
-</html>"""# donate
-  _shop
+app = FastAPI(title="Donate Shop Backend")
+
+ADMIN_IDS = [8800181441]
+DB_PATH = "shop.db"
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            price INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+class ProductRequest(BaseModel):
+    admin_id: int
+    title: str
+    price: int
+
+@app.get("/")
+def read_root():
+    return {"status": "online", "admin": ADMIN_IDS}
+
+# Проверка админа по ID
+@app.get("/api/admin/check")
+def check_admin(user_id: int):
+    if user_id in ADMIN_IDS:
+        return {"is_admin": True}
+    return {"is_admin": False}
+
+# Добавление товара (управляется с сервера)
+@app.post("/api/admin/products/add")
+def add_product(data: ProductRequest):
+    if data.admin_id not in ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO products (title, price) VALUES (?, ?)", (data.title, data.price))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": f"Товар '{data.title}' добавлен"}
+
+@app.get("/api/products")
+def get_products():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, price FROM products")
+    rows = cursor.fetchall()
+    conn.close()
+    return {"products": [{"id": r[0], "title": r[1], "price": r[2]} for r in rows]}
