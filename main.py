@@ -400,4 +400,105 @@ def serve_admin():
         loadOrders();
     </script>
 </body>
-</html>"""# donate_shop
+</html>"""# donate
+  _shop
+import os
+import sqlite3
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+app = FastAPI(title="Donate Shop All-in-One")
+
+ADMIN_IDS = [8800181441]
+DB_PATH = "shop.db"
+
+# Инициализация базы данных
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Таблица пользователей и баланса
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER DEFAULT 0
+        )
+    """)
+    # Таблица товаров магазина
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            price INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+init_db()
+
+class TopUpRequest(BaseModel):
+    user_id: int
+    amount: int
+    card_number: str
+
+class ProductRequest(BaseModel):
+    admin_id: int
+    title: str
+    price: int
+
+@app.get("/")
+def read_root():
+    return {"status": "online", "admin": ADMIN_IDS}
+
+# Проверка админа
+@app.get("/api/admin/check")
+def check_admin(user_id: int):
+    if user_id in ADMIN_IDS:
+        return {"is_admin": True}
+    return {"is_admin": False}
+
+# Пополнение баланса через карту
+@app.post("/api/balance/topup")
+def topup_balance(data: TopUpRequest):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Проверяем, есть ли пользователь, если нет — создаем
+    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (data.user_id,))
+    row = cursor.fetchone()
+    
+    if row is None:
+        cursor.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (data.user_id, data.amount))
+    else:
+        new_balance = row[0] + data.amount
+        cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (new_balance, data.user_id))
+        
+    conn.commit()
+    conn.close()
+    return {"status": "success", "added": data.amount}
+
+# Получение списка товаров
+@app.get("/api/products")
+def get_products():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, price FROM products")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    products = [{"id": r[0], "title": r[1], "price": r[2]} for r in rows]
+    return {"products": products}
+
+# Добавление товара через админ-панель
+@app.post("/api/admin/products/add")
+def add_product(data: ProductRequest):
+    if data.admin_id not in ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO products (title, price) VALUES (?, ?)", (data.title, data.price))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": f"Товар '{data.title}' успешно добавлен!"}
+
